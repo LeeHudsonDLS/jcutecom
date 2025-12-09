@@ -1,5 +1,8 @@
-# Lines from .bashrc to run jcutecom and to pull the image from docker.io if needed
+# Lines from `.bashrc` to run `cutecom` and to pull the image from docker.io if needed
 
+### Add these aliases to your `~/.bashrc`
+
+```bash
 alias cutecom='podman run --rm -it \
     --volume $(pwd):/data --workdir /data \
     --env DISPLAY=$DISPLAY \
