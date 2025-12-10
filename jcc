@@ -1,112 +1,50 @@
 #!/bin/bash
-
-# A script for launching 'RHEL 7 in a Box' on a DLS workstation
-
-# NOTE that changes to this file should also be propgated to .devcontainer.json
+# Launch jcutecom (cutecom with telnet support created by Jon Thompson)
 
 image=docker.io/leehudsondls/cutecom-qt3
 version=latest
 hostname=$(hostname)
-changed=false
 pull=false
-rhel=8
 delete=false
 gui=false
-mount_only=false
-install_devcontainer_json=false
 network="--net=host"
-userns=""
-logging=""
-# -l loads profile and bashrc
-command="/bin/bash -l"
-commandargs=
+container_name=cutecom-qt3
 
-while getopts "mglrdphs:i:v:cnI" arg; do
+while getopts "lrdpghs:i:v:n" arg; do
     case $arg in
-    l)  logging="set -x"    # enable logging
-        ;;
-    r)
-        changed=true
-        userns=""
-        ;;
-    g)
-        changed=true
-        gui=true
-        ;;
-    p)
-        pull=true
-        changed=true
-        ;;
-    s)
-        hostname=$OPTARG
-        changed=true
-        ;;
-    i)
-        image=$OPTARG
-        changed=true
-        ;;
-    n)
-        network="--network=podman"
-        changed=true
-        ;;
-    v)
-        version=$OPTARG
-        changed=true
-        ;;
-    c)
-        commandargs=YES
-        command="/bin/bash -lc "
-        break
-        ;;
-    d)  delete=true
-        ;;
-    I)  install_devcontainer_json=true
-        ;;
-    *)
-        echo "
-usage: c7 [options]
-
-Launches a developer container that simulates a DLS RHEL7 workstation.
-
-Options:
-
-    -h              show this help
-    -l              Enable logging
-    -p              pull an updated version of the image first
-    -i image        specify the container image (default: "${image}")
-    -v version      specify the image version (default: "${version}")
-    -s host         set a hostname for your container (default: ${hostname})
-    -d              delete previous container and start afresh
-    -n              run in podman virtual network instead of the host network
-    -c command      run a command in the container (must be last option)
-    -I              Install .devcontainer/devcontainer.json in the current directory for vscode
-    -g              enable X11 GUI for containers launched via ssh (only required with -r)
-    -r              run as root
-"
-        exit 0
-        ;;
+        l) set -x ;;  # enable logging
+        r) userns="" ;;  # run as root
+        g) gui=true ;;
+        p) pull=true ;;
+        s) hostname=$OPTARG ;;
+        i) image=$OPTARG ;;
+        v) version=$OPTARG ;;
+        n) network="--network=podman" ;;
+        d) delete=true ;;
+        *) echo "Usage: $0 [-l] [-r] [-g] [-p] [-s hostname] [-i image] [-v version] [-n] [-d]"; exit 0 ;;
     esac
 done
-
 shift $((OPTIND-1))
 
-
-
-
-
-if [[ -e /etc/centos-release ]] ; then
-    echo "ERROR: already in the a devcontainer"
+# Prevent running inside a devcontainer
+if [[ -e /etc/centos-release ]]; then
+    echo "ERROR: already in a devcontainer"
     exit 1
 fi
 
-if ${delete} ; then
-    podman rm -ft0 cutecom-qt3
-    changed=false
+# Delete old container if requested
+if $delete; then
+    podman rm -ft0 $container_name
 fi
 
+# Pull image if needed
+if ! podman image exists ${image}:${version} || $pull; then
+    podman pull ${image}:${version}
+fi
 
+# Environment variables
 environ="
-    -e CONTAINER_NAME=cutecom-qt3
+    -e CONTAINER_NAME=${container_name}
     -e DISPLAY
     -e HOME
     -e USER
@@ -114,95 +52,40 @@ environ="
     -e TERM=xterm-256color
 "
 
-volumes="
-    -v /home:/home:shared
-"
+# Volumes
+volumes="-v /home:/home:shared"
 
+# Options
 opts="${network} --hostname ${hostname} --security-opt=label=disable"
-# Get around the issue of /tmp being mounted noexec by creating our own tmpfs
-#opts="${opts} --mount type=tmpfs,destination=/tmp"
 
-# the identity settings enable secondary groups in the container
-if [[ ${rhel} == 8 ]] ; then
-    identity="${userns}
-              --annotation run.oci.keep_original_groups=1"
-fi
-
-# this runtime is also required for secondary groups
-if which crun &> /dev/null ; then
-    runtime="--runtime /usr/bin/crun"
-    identity="${identity} --storage-opt ignore_chown_errors=true"
-fi
-
-container_name=cutecom-qt3
-
-# setup X11 to work even if you launched cutecom-qt3 from an ssh shell
-# NOTE: this does not appear to be needed - I believe because the
-# container uses keep-id the X11 auth passes through SSH OK.
-if [[ ${gui} == "true" ]] ; then
-    XSOCK=/tmp/.X11-unix # X11 socket (but we mount the whole of tmp)
+# X11 GUI setup
+if [[ $gui == "true" ]]; then
+    XSOCK=/tmp/.X11-unix
     XAUTH=/tmp/.container.xauth.$USER
     touch $XAUTH
     xauth nlist $DISPLAY | sed -e 's/^..../ffff/' | xauth -f $XAUTH nmerge -
     chmod 777 $XAUTH
-
-    x11="
-    -v $XAUTH:$XAUTH
-    -e XAUTHORITY=$XAUTH
-    "
-
+    x11="-v $XAUTH:$XAUTH -e XAUTHORITY=$XAUTH"
     opts="${opts} ${x11}"
-
-    echo "X11 over ssh compatibility mode"
+    echo "X11 over SSH compatibility enabled"
 fi
 
-################################################################################
-# Start the container in the background and then launch an interactive bash
-# session in the container. This means that all invocations of this script
-# share the same container. Also changes to the container filesystem are
-# preserved unless an explict 'podman rm cutecom-qt3' is invoked.
-################################################################################
+# Runtime
+runtime=""
+if which crun &> /dev/null; then
+    runtime="--runtime /usr/bin/crun"
+    identity="--annotation run.oci.keep_original_groups=1 --storage-opt ignore_chown_errors=true"
+else
+    identity="--annotation run.oci.keep_original_groups=1"
+fi
 
-running=false
-
+# Start or attach to container
 if [[ -n $(podman ps -q -f name=${container_name}) ]]; then
-    # container already running so no prep required
-    if ${changed} ; then
-        echo "ERROR: cannot change properties on a running container."
-        echo "Use -d option to delete the current container."
-        exit 1
-    fi
-    running=true
-    version_tag=$(podman inspect --format='{{index .Config.Labels "org.opencontainers.image.version"}}' cutecom-qt3)
-    echo "Attaching to existing cutecom-qt3 container version ${version_tag:- Unknown} ..."
+    echo "Attaching to existing container..."
 elif [[ -n $(podman ps -qa -f name=${container_name}) ]]; then
-    # start the stopped container
-    echo "Restarting stopped cutecom-qt3 container ..."
-
+    echo "Restarting stopped container..."
     podman start ${container_name}
-elif [[ ${running} == "false" ]]; then
-    # check for updates if requested/required
-    if ! podman image exists ${image}:${version} ; then
-        pull=true
-    fi
-    if ${pull} ; then
-        podman pull ${image}:${version}; echo
-    fi
-
-    # Create a new background container making process 1 wait indefinitely.
-    # Prior to sleep we update the default shell to be bash,
-    # this is because podman adds a user in etc/passwd but fails to honor
-    # /etc/adduser.conf
-    #version_tag=$(podman inspect --format='{{index .Labels "org.opencontainers.image.version"}}' docker.io/leehudsondls/cutecom-qt3:${version})
-    #echo "Creating new cutecom-qt3 container version ${version_tag:- Unknown} ..."
-    #${logging}
-
-    # At runtime we launch bash in the container and perform the following:
-    #    Restore bash as the default shell in etc/passwd
-    #    Reinstall git-core to overcome issue of https plugin missing
-    #    Remove the git safe directory check to match the behaviour of RHEL7 git
-    echo "podman run -dit -r --name ${container_name} ${runtime} ${environ}\
-        ${identity} ${volumes} ${devices} ${opts} ${image}:${version}"
-    podman run -dit --name ${container_name} ${runtime} ${environ}\
-        ${identity} ${volumes} ${devices} ${opts} ${image}:${version}
+else
+    echo "Creating new container..."
+    podman run -dit --name ${container_name} ${runtime} ${environ} ${identity} ${volumes} ${opts} ${image}:${version}
 fi
