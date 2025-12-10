@@ -11,3 +11,22 @@ alias cutecom='podman run --rm -it \
     docker.io/leehudsondls/cutecom-qt3'
 
 alias cutecom-load='podman pull docker.io/leehudsondls/cutecom-qt3:latest'
+```
+
+
+# More useful commands:
+
+# Save an image currently in the local podman image store ( shows in `podman images`)
+```bash
+podman save -o image.tar your-image:tag
+```
+
+# Build an image from a Dockerfile:
+```bash
+podman build -t cutecom-qt3 .
+```
+
+# Load an image from a tar:
+```bash
+podman load -i cutecom-qt3.tar
+```
