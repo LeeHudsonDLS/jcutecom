@@ -15,7 +15,7 @@ gui=false
 mount_only=false
 install_devcontainer_json=false
 network="--net=host"
-userns="--userns=keep-id"
+userns=""
 logging=""
 # -l loads profile and bashrc
 command="/bin/bash -l"
@@ -115,16 +115,12 @@ environ="
 "
 
 volumes="
-    -v /scratch:/scratch
-    -v /dls:/dls:shared
-    -v /dls_sw:/dls_sw:shared
     -v /home:/home:shared
-    -v /run/user/$(id -u):/run/user/$(id -u)
 "
 
 opts="${network} --hostname ${hostname} --security-opt=label=disable"
 # Get around the issue of /tmp being mounted noexec by creating our own tmpfs
-opts="${opts} --mount type=tmpfs,destination=/tmp"
+#opts="${opts} --mount type=tmpfs,destination=/tmp"
 
 # the identity settings enable secondary groups in the container
 if [[ ${rhel} == 8 ]] ; then
@@ -205,7 +201,7 @@ elif [[ ${running} == "false" ]]; then
     #    Restore bash as the default shell in etc/passwd
     #    Reinstall git-core to overcome issue of https plugin missing
     #    Remove the git safe directory check to match the behaviour of RHEL7 git
-    echo "podman run -dit --name ${container_name} ${runtime} ${environ}\
+    echo "podman run -dit -r --name ${container_name} ${runtime} ${environ}\
         ${identity} ${volumes} ${devices} ${opts} ${image}:${version}"
     podman run -dit --name ${container_name} ${runtime} ${environ}\
         ${identity} ${volumes} ${devices} ${opts} ${image}:${version}
